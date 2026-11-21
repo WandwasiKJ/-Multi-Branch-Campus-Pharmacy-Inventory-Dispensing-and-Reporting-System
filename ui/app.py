@@ -133,8 +133,9 @@ class PharmacyApp:
         for widget in self.content.winfo_children():
             widget.destroy()
 
+    
     def get_dashboard_counts(self):
-        """Retrieve summary figures from the database."""
+        """Retrieve current summary figures from SQLite."""
 
         with self.db.connect() as connection:
 
@@ -150,17 +151,27 @@ class PharmacyApp:
                 "SELECT COUNT(*) FROM prescriptions"
             ).fetchone()[0]
 
-            low_stock = connection.execute(
-                """
+            pending = connection.execute("""
+                SELECT COUNT(*)
+                FROM prescriptions
+                WHERE status = 'pending'
+            """).fetchone()[0]
+
+            low_stock = connection.execute("""
                 SELECT COUNT(*)
                 FROM stock s
                 JOIN medicines m
                     ON s.medicine_code = m.medicine_code
                 WHERE s.quantity <= m.reorder_level
-                """
-            ).fetchone()[0]
+            """).fetchone()[0]
 
-        return medicines, branches, prescriptions, low_stock
+        return {
+            "medicines": medicines,
+            "branches": branches,
+            "prescriptions": prescriptions,
+            "pending": pending,
+            "low_stock": low_stock
+        }
 
     def create_summary_card(self, parent, title, value, colour):
 
@@ -217,6 +228,7 @@ class PharmacyApp:
                 "Registered Medicines",
                 "Pharmacy Branches",
                 "Prescriptions",
+                "Pending Prescriptions",
                 "Low Stock Items"
             ]
 
@@ -224,7 +236,16 @@ class PharmacyApp:
                 "#2874A6",
                 "#239B56",
                 "#8E44AD",
+                "#F39C12",
                 "#D35400"
+            ]
+
+            value_keys = [
+                "medicines",
+                "branches",
+                "prescriptions",
+                "pending",
+                "low_stock"
             ]
 
             cards_frame = tk.Frame(
@@ -234,7 +255,7 @@ class PharmacyApp:
             cards_frame.pack(fill="x")
 
             for i, (label, value, colour) in enumerate(
-                zip(labels, values, colours)
+                zip(labels, [values[key] for key in value_keys], colours)
             ):
                 card = self.create_summary_card(
                     cards_frame, label, value, colour
@@ -1676,11 +1697,211 @@ class PharmacyApp:
 
             self.refresh_pending_prescriptions()
 
-    def show_reports(self):
-        self.show_placeholder(
-            "Low Stock Reports",
-            "View medicines that have reached or fallen below reorder levels."
+    
+    def show_low_stock(self):
+        """Display medicines whose stock is at or below reorder level."""
+
+        for widget in self.content.winfo_children():
+            widget.destroy()
+
+        tk.Label(
+            self.content,
+            text="Low Stock Reports",
+            font=("Arial", 20, "bold"),
+            bg="white"
+        ).pack(anchor="w", pady=(0, 10))
+
+        tk.Label(
+            self.content,
+            text="Medicines requiring restocking are highlighted below.",
+            font=("Arial", 10),
+            bg="white"
+        ).pack(anchor="w", pady=5)
+
+        # Branch filter
+        filter_frame = tk.Frame(self.content, bg="white")
+        filter_frame.pack(fill="x", pady=10)
+
+        tk.Label(
+            filter_frame,
+            text="Filter by Branch:",
+            bg="white",
+            font=("Arial", 10, "bold")
+        ).pack(side="left", padx=5)
+
+        with self.db.connect() as connection:
+            branches = connection.execute("""
+                SELECT branch_code, branch_name
+                FROM branches
+                ORDER BY branch_name
+            """).fetchall()
+
+        self.report_branch_lookup = {
+            f"{row['branch_code']} - {row['branch_name']}": row['branch_code']
+            for row in branches
+        }
+
+        self.report_branch_combo = ttk.Combobox(
+            filter_frame,
+            state="readonly",
+            width=30,
+            values=["All Branches"] +
+                   list(self.report_branch_lookup.keys())
         )
+        self.report_branch_combo.pack(side="left", padx=5)
+        self.report_branch_combo.set("All Branches")
+
+        tk.Button(
+            filter_frame,
+            text="Apply Filter",
+            command=self.refresh_low_stock_report,
+            bg="#1976D2",
+            fg="white"
+        ).pack(side="left", padx=5)
+
+        tk.Button(
+            filter_frame,
+            text="Refresh",
+            command=self.refresh_low_stock_report,
+            bg="#2E7D32",
+            fg="white"
+        ).pack(side="left", padx=5)
+
+        # Report summary
+        self.low_stock_summary = tk.Label(
+            self.content,
+            text="",
+            font=("Arial", 12, "bold"),
+            bg="white"
+        )
+        self.low_stock_summary.pack(anchor="w", pady=10)
+
+        # Report table
+        self.low_stock_table = ttk.Treeview(
+            self.content,
+            columns=(
+                "medicine_code",
+                "medicine_name",
+                "branch",
+                "quantity",
+                "reorder_level",
+                "status"
+            ),
+            show="headings",
+            height=15
+        )
+
+        headings = {
+            "medicine_code": "Medicine Code",
+            "medicine_name": "Medicine Name",
+            "branch": "Branch",
+            "quantity": "Current Quantity",
+            "reorder_level": "Reorder Level",
+            "status": "Stock Status"
+        }
+
+        for column, heading in headings.items():
+            self.low_stock_table.heading(column, text=heading)
+            self.low_stock_table.column(column, width=145)
+
+        self.low_stock_table.tag_configure(
+            "low",
+            background="#FFCDD2",
+            foreground="#B71C1C"
+        )
+
+        self.low_stock_table.tag_configure(
+            "normal",
+            background="#E8F5E9",
+            foreground="#1B5E20"
+        )
+
+        self.low_stock_table.pack(
+            fill="both",
+            expand=True,
+            pady=10
+        )
+
+        self.refresh_low_stock_report()
+
+    def refresh_low_stock_report(self):
+        """Refresh the low-stock report using current database values."""
+
+        for item in self.low_stock_table.get_children():
+            self.low_stock_table.delete(item)
+
+        selected_branch = self.report_branch_combo.get()
+
+        query = """
+            SELECT
+                m.medicine_code,
+                m.name AS medicine_name,
+                b.branch_name,
+                s.quantity,
+                m.reorder_level
+            FROM stock s
+            JOIN medicines m
+                ON s.medicine_code = m.medicine_code
+            JOIN branches b
+                ON s.branch_code = b.branch_code
+        """
+
+        parameters = []
+
+        if selected_branch and selected_branch != "All Branches":
+            branch_code = self.report_branch_lookup[selected_branch]
+            query += " WHERE s.branch_code = ?"
+            parameters.append(branch_code)
+
+        query += """
+            ORDER BY
+                CASE WHEN s.quantity <= m.reorder_level
+                     THEN 0 ELSE 1 END,
+                m.name
+        """
+
+        with self.db.connect() as connection:
+            records = connection.execute(
+                query, parameters
+            ).fetchall()
+
+        low_count = 0
+
+        for record in records:
+            is_low = record["quantity"] <= record["reorder_level"]
+
+            if is_low:
+                low_count += 1
+                status = "LOW STOCK"
+                tag = "low"
+            else:
+                status = "NORMAL"
+                tag = "normal"
+
+            self.low_stock_table.insert(
+                "",
+                "end",
+                values=(
+                    record["medicine_code"],
+                    record["medicine_name"],
+                    record["branch_name"],
+                    record["quantity"],
+                    record["reorder_level"],
+                    status
+                ),
+                tags=(tag,)
+            )
+
+        self.low_stock_summary.config(
+            text=(
+                f"Total stock records: {len(records)}   |   "
+                f"Medicines requiring restocking: {low_count}"
+            )
+        )
+
+    def show_reports(self):
+        """Compatibility entry point for the low-stock report menu."""
+        self.show_low_stock()
 
     def run(self):
         self.root.mainloop()
