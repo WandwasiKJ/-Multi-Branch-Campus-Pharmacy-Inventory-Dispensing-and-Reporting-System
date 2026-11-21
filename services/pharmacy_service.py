@@ -1,4 +1,5 @@
 import sqlite3
+from models.prescription import Prescription
 
 
 class PharmacyService:
@@ -113,3 +114,91 @@ class PharmacyService:
             ).fetchall()
 
         return results
+
+    def create_prescription(self, prescription):
+        """Save a prescription and all its medicine lines."""
+
+        if not isinstance(prescription, Prescription):
+            raise TypeError("Expected a Prescription object.")
+
+        try:
+            # The connection context commits on success
+            # and rolls back if an exception occurs.
+            with self.db.connect() as connection:
+
+                connection.execute(
+                    """
+                    INSERT INTO prescriptions (
+                        prescription_id,
+                        patient_id,
+                        branch_code,
+                        prescriber_code,
+                        status
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        prescription.prescription_id,
+                        prescription.patient_id,
+                        prescription.branch_code,
+                        prescription.prescriber_code,
+                        prescription.status
+                    )
+                )
+
+                # Save every medicine line.
+                for line in prescription.lines:
+                    connection.execute(
+                        """
+                        INSERT INTO prescription_lines (
+                            prescription_id,
+                            medicine_code,
+                            quantity
+                        )
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            prescription.prescription_id,
+                            line.medicine_code,
+                            line.quantity
+                        )
+                    )
+
+            return True
+
+        except sqlite3.IntegrityError as error:
+            raise ValueError(
+                f"Could not save prescription. "
+                f"Check duplicate IDs and referenced records: {error}"
+            ) from error
+
+    def get_prescription(self, prescription_id):
+        """Retrieve a prescription together with its medicine lines."""
+
+        with self.db.connect() as connection:
+
+            prescription = connection.execute(
+                """
+                SELECT *
+                FROM prescriptions
+                WHERE prescription_id = ?
+                """,
+                (prescription_id,)
+            ).fetchone()
+
+            if prescription is None:
+                return None
+
+            lines = connection.execute(
+                """
+                SELECT *
+                FROM prescription_lines
+                WHERE prescription_id = ?
+                """,
+                (prescription_id,)
+            ).fetchall()
+
+            result = dict(prescription)
+            result["lines"] = [dict(line) for line in lines]
+
+            return result

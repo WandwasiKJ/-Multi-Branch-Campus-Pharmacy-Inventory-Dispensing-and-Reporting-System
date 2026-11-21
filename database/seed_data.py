@@ -10,7 +10,10 @@ def seed_database(db):
         ("MED001", "BR001", 100), ("MED002", "BR001", 40),
         ("MED003", "BR001", 12), ("MED001", "BR002", 8),
     ]
-    prescribers = [("PRESC-DEMO-01", "Fictional Prescriber One", 1)]
+    prescribers = [
+        ("PRESC-DEMO-01", "Fictional Prescriber One", 1),
+        ("PRESC-UNAUTHORISED", "Fictional Unauthorised Prescriber", 0),
+    ]
 
     with db.connect() as con:
         con.executemany("INSERT OR IGNORE INTO medicines VALUES (?, ?, ?, ?, ?)", medicines)
