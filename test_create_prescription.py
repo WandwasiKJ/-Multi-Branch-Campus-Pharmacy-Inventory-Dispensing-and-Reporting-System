@@ -9,6 +9,13 @@ db.initialise()
 seed_database(db)
 service = PharmacyService(db)
 
+# Make this standalone script repeatable.
+with db.connect() as connection:
+    connection.execute(
+        "DELETE FROM prescriptions WHERE prescription_id = ?",
+        ("RX-TEST-001",)
+    )
+
 # Create medicine lines
 line1 = PrescriptionLine("MED001", 2)
 line2 = PrescriptionLine("MED002", 3)

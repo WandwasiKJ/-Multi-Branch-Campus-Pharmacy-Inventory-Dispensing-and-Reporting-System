@@ -1,4 +1,5 @@
 from models.medicine import OrdinaryMedicine, ControlledMedicine
+from models.branch import Branch
 from services.pharmacy_service import PharmacyService
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -576,10 +577,436 @@ class PharmacyApp:
             )
 
     def show_stock(self):
-        self.show_placeholder(
-            "Branches and Stock Management",
-            "Manage pharmacy branches and receive stock."
+        self.clear_content()
+
+        tk.Label(
+            self.content,
+            text="Branches and Stock Management",
+            bg=self.background,
+            fg=self.primary,
+            font=("Arial", 22, "bold")
+        ).pack(anchor="w")
+
+        tk.Label(
+            self.content,
+            text="Register branches and receive stock.",
+            bg=self.background,
+            fg="#667085",
+            font=("Arial", 11)
+        ).pack(anchor="w", pady=(5, 15))
+
+        forms = tk.Frame(self.content, bg=self.background)
+        forms.pack(fill="x")
+        forms.columnconfigure(0, weight=1)
+        forms.columnconfigure(1, weight=1)
+
+        branch_form = tk.LabelFrame(
+            forms,
+            text="Register Branch",
+            bg=self.white,
+            fg=self.primary,
+            font=("Arial", 11, "bold"),
+            padx=12,
+            pady=12
         )
+        branch_form.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        self.branch_code = tk.StringVar()
+        self.branch_name = tk.StringVar()
+
+        tk.Label(
+            branch_form, text="Branch Code",
+            bg=self.white, fg=self.primary
+        ).grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        tk.Entry(
+            branch_form, textvariable=self.branch_code, width=22
+        ).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
+
+        tk.Label(
+            branch_form, text="Branch Name",
+            bg=self.white, fg=self.primary
+        ).grid(row=1, column=0, sticky="w", padx=6, pady=6)
+        tk.Entry(
+            branch_form, textvariable=self.branch_name, width=22
+        ).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+
+        tk.Button(
+            branch_form,
+            text="Register Branch",
+            command=self.register_branch,
+            bg=self.secondary,
+            fg=self.white,
+            relief="flat",
+            padx=12,
+            pady=7,
+            cursor="hand2"
+        ).grid(row=2, column=0, columnspan=2, pady=(8, 2))
+        branch_form.columnconfigure(1, weight=1)
+
+        stock_form = tk.LabelFrame(
+            forms,
+            text="Receive Stock",
+            bg=self.white,
+            fg=self.primary,
+            font=("Arial", 11, "bold"),
+            padx=12,
+            pady=12
+        )
+        stock_form.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+        self.receive_branch_var = tk.StringVar()
+        self.receive_medicine_var = tk.StringVar()
+        self.receive_quantity_var = tk.StringVar()
+
+        tk.Label(
+            stock_form, text="Branch",
+            bg=self.white, fg=self.primary
+        ).grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        self.receive_branch_box = ttk.Combobox(
+            stock_form,
+            textvariable=self.receive_branch_var,
+            state="readonly",
+            width=30
+        )
+        self.receive_branch_box.grid(
+            row=0, column=1, sticky="ew", padx=6, pady=6
+        )
+
+        tk.Label(
+            stock_form, text="Medicine",
+            bg=self.white, fg=self.primary
+        ).grid(row=1, column=0, sticky="w", padx=6, pady=6)
+        self.receive_medicine_box = ttk.Combobox(
+            stock_form,
+            textvariable=self.receive_medicine_var,
+            state="readonly",
+            width=30
+        )
+        self.receive_medicine_box.grid(
+            row=1, column=1, sticky="ew", padx=6, pady=6
+        )
+
+        tk.Label(
+            stock_form, text="Quantity",
+            bg=self.white, fg=self.primary
+        ).grid(row=2, column=0, sticky="w", padx=6, pady=6)
+        tk.Entry(
+            stock_form,
+            textvariable=self.receive_quantity_var,
+            width=33
+        ).grid(row=2, column=1, sticky="ew", padx=6, pady=6)
+
+        tk.Button(
+            stock_form,
+            text="Receive Stock",
+            command=self.receive_stock_gui,
+            bg=self.secondary,
+            fg=self.white,
+            relief="flat",
+            padx=12,
+            pady=7,
+            cursor="hand2"
+        ).grid(row=3, column=0, columnspan=2, pady=(8, 2))
+        stock_form.columnconfigure(1, weight=1)
+
+        table_frame = tk.Frame(self.content, bg=self.background)
+        table_frame.pack(fill="both", expand=True, pady=(15, 0))
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.columnconfigure(1, weight=2)
+
+        branch_table_frame = tk.Frame(table_frame, bg=self.white)
+        branch_table_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        tk.Label(
+            branch_table_frame,
+            text="Registered Branches",
+            bg=self.white,
+            fg=self.primary,
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=8, pady=8)
+
+        self.branch_table = ttk.Treeview(
+            branch_table_frame,
+            columns=("code", "name"),
+            show="headings",
+            height=10
+        )
+        self.branch_table.heading("code", text="Branch Code")
+        self.branch_table.heading("name", text="Branch Name")
+        self.branch_table.column("code", width=100)
+        self.branch_table.column("name", width=180)
+        self.branch_table.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        stock_table_frame = tk.Frame(table_frame, bg=self.white)
+        stock_table_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+        tk.Label(
+            stock_table_frame,
+            text="Stock by Branch",
+            bg=self.white,
+            fg=self.primary,
+            font=("Arial", 12, "bold")
+        ).pack(anchor="w", padx=8, pady=8)
+
+        filter_frame = tk.Frame(stock_table_frame, bg=self.white)
+        filter_frame.pack(fill="x", padx=8)
+
+        self.stock_filter_var = tk.StringVar(value="All branches")
+        self.stock_filter_box = ttk.Combobox(
+            filter_frame,
+            textvariable=self.stock_filter_var,
+            state="readonly",
+            width=28
+        )
+        self.stock_filter_box.pack(side="left")
+        self.stock_filter_box.bind(
+            "<<ComboboxSelected>>",
+            lambda event: self.refresh_stock()
+        )
+
+        tk.Button(
+            filter_frame,
+            text="Refresh",
+            command=self.refresh_stock,
+            bg=self.primary,
+            fg=self.white,
+            relief="flat",
+            padx=10
+        ).pack(side="left", padx=8)
+
+        self.stock_table = ttk.Treeview(
+            stock_table_frame,
+            columns=("medicine", "name", "branch", "quantity", "reorder", "status"),
+            show="headings",
+            height=10
+        )
+        stock_headings = {
+            "medicine": "Medicine Code",
+            "name": "Medicine",
+            "branch": "Branch",
+            "quantity": "Quantity",
+            "reorder": "Reorder",
+            "status": "Status"
+        }
+        for column, heading in stock_headings.items():
+            self.stock_table.heading(column, text=heading)
+            self.stock_table.column(column, width=95)
+
+        self.stock_table.tag_configure(
+            "low", background="#FCE4D6", foreground="#9C0006"
+        )
+        self.stock_table.tag_configure(
+            "normal", background="#E2F0D9", foreground="#375623"
+        )
+
+        stock_scroll = ttk.Scrollbar(
+            stock_table_frame,
+            orient="vertical",
+            command=self.stock_table.yview
+        )
+        self.stock_table.configure(yscrollcommand=stock_scroll.set)
+        self.stock_table.pack(
+            side="left", fill="both", expand=True, padx=(8, 0), pady=(8, 8)
+        )
+        stock_scroll.pack(side="right", fill="y", pady=(8, 8), padx=(0, 8))
+
+        self.load_stock_options()
+        self.refresh_branches()
+        self.refresh_stock()
+
+    def register_branch(self):
+        code = self.branch_code.get().strip()
+        name = self.branch_name.get().strip()
+
+        try:
+            if not code or not name:
+                raise ValueError("Branch code and name are required.")
+
+            branch = Branch(code, name)
+            self.pharmacy_service.register_branch(branch)
+
+            messagebox.showinfo(
+                "Success", "Branch registered successfully."
+            )
+            self.branch_code.set("")
+            self.branch_name.set("")
+            self.load_stock_options()
+            self.refresh_branches()
+            self.refresh_stock()
+
+        except ValueError as error:
+            messagebox.showerror("Invalid Input", str(error))
+        except Exception as error:
+            messagebox.showerror(
+                "Registration Error",
+                f"Could not register branch:\n{error}"
+            )
+
+    def load_stock_options(self):
+        try:
+            with self.db.connect() as connection:
+                branches = connection.execute(
+                    """
+                    SELECT branch_code, branch_name
+                    FROM branches
+                    ORDER BY branch_name
+                    """
+                ).fetchall()
+                medicines = connection.execute(
+                    """
+                    SELECT medicine_code, name
+                    FROM medicines
+                    ORDER BY name
+                    """
+                ).fetchall()
+
+            self.branch_lookup = {
+                f'{record["branch_code"]} - {record["branch_name"]}':
+                record["branch_code"]
+                for record in branches
+            }
+            self.medicine_lookup = {
+                f'{record["medicine_code"]} - {record["name"]}':
+                record["medicine_code"]
+                for record in medicines
+            }
+
+            branch_values = list(self.branch_lookup.keys())
+            medicine_values = list(self.medicine_lookup.keys())
+            self.receive_branch_box.configure(values=branch_values)
+            self.receive_medicine_box.configure(values=medicine_values)
+            self.stock_filter_box.configure(
+                values=["All branches"] + branch_values
+            )
+
+        except Exception as error:
+            messagebox.showerror(
+                "Database Error",
+                f"Could not load branches and medicines:\n{error}"
+            )
+
+    def receive_stock_gui(self):
+        branch_selection = self.receive_branch_var.get()
+        medicine_selection = self.receive_medicine_var.get()
+        quantity_text = self.receive_quantity_var.get().strip()
+
+        if not branch_selection or not medicine_selection:
+            messagebox.showwarning(
+                "Missing Information",
+                "Please select a branch and medicine."
+            )
+            return
+
+        try:
+            quantity = int(quantity_text)
+            branch_code = self.branch_lookup[branch_selection]
+            medicine_code = self.medicine_lookup[medicine_selection]
+
+            self.pharmacy_service.receive_stock(
+                medicine_code, branch_code, quantity
+            )
+
+            messagebox.showinfo(
+                "Success",
+                f"{quantity} units of {medicine_code} received at {branch_code}."
+            )
+            self.receive_quantity_var.set("")
+            self.refresh_stock()
+
+        except (ValueError, KeyError) as error:
+            messagebox.showerror("Invalid Input", str(error))
+        except Exception as error:
+            messagebox.showerror(
+                "Stock Error",
+                f"Could not receive stock:\n{error}"
+            )
+
+    def refresh_branches(self):
+        for item in self.branch_table.get_children():
+            self.branch_table.delete(item)
+
+        try:
+            with self.db.connect() as connection:
+                records = connection.execute(
+                    """
+                    SELECT branch_code, branch_name
+                    FROM branches
+                    ORDER BY branch_code
+                    """
+                ).fetchall()
+
+            for record in records:
+                self.branch_table.insert(
+                    "",
+                    "end",
+                    values=(record["branch_code"], record["branch_name"])
+                )
+        except Exception as error:
+            messagebox.showerror(
+                "Database Error",
+                f"Could not load branches:\n{error}"
+            )
+
+    def refresh_stock(self):
+        for item in self.stock_table.get_children():
+            self.stock_table.delete(item)
+
+        selected_branch = self.stock_filter_var.get()
+        branch_code = None
+        if selected_branch != "All branches":
+            branch_code = getattr(self, "branch_lookup", {}).get(
+                selected_branch
+            )
+
+        try:
+            with self.db.connect() as connection:
+                query = """
+                    SELECT
+                        m.medicine_code,
+                        m.name,
+                        b.branch_code,
+                        s.quantity,
+                        m.reorder_level
+                    FROM stock s
+                    JOIN medicines m
+                        ON s.medicine_code = m.medicine_code
+                    JOIN branches b
+                        ON s.branch_code = b.branch_code
+                """
+                parameters = ()
+                if branch_code:
+                    query += " WHERE b.branch_code = ?"
+                    parameters = (branch_code,)
+                query += " ORDER BY b.branch_code, m.medicine_code"
+
+                records = connection.execute(query, parameters).fetchall()
+
+            for record in records:
+                if record["quantity"] <= record["reorder_level"]:
+                    status = "LOW STOCK"
+                    tag = "low"
+                else:
+                    status = "Available"
+                    tag = "normal"
+
+                self.stock_table.insert(
+                    "",
+                    "end",
+                    values=(
+                        record["medicine_code"],
+                        record["name"],
+                        record["branch_code"],
+                        record["quantity"],
+                        record["reorder_level"],
+                        status
+                    ),
+                    tags=(tag,)
+                )
+        except Exception as error:
+            messagebox.showerror(
+                "Database Error",
+                f"Could not load stock records:\n{error}"
+            )
 
     def show_prescriptions(self):
         self.show_placeholder(

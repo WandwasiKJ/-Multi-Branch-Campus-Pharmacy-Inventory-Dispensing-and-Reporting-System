@@ -5,8 +5,16 @@ from models.prescription import Prescription, PrescriptionLine
 
 # Connect to the database and services
 db = DatabaseManager()
+db.initialise()
 pharmacy = PharmacyService(db)
 dispensing = DispensingService(db)
+
+# Make this standalone script repeatable.
+with db.connect() as connection:
+    connection.execute(
+        "DELETE FROM prescriptions WHERE prescription_id = ?",
+        ("RX-ROLLBACK-001",)
+    )
 
 
 def show_stock(medicine_code, branch_code):

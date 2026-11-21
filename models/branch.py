@@ -36,7 +36,3 @@ class Branch:
     def display_branch(self):
 
         return f"{self.branch_code} - {self.branch_name}"
-    
-branch = Branch("BR001", "Main Campus Pharmacy")
-
-print(branch.display_branch())
