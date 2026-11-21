@@ -4,12 +4,13 @@ from services.pharmacy_service import PharmacyService
 import tkinter as tk
 from tkinter import ttk, messagebox
 from models.prescription import Prescription, PrescriptionLine
-
+from services.dispensing_service import DispensingService 
 
 class PharmacyApp:
     def __init__(self, db):
         self.db = db
-        
+        self.dispensing_service = DispensingService(db)
+
         self.pharmacy_service = PharmacyService(db)
 
         # Main application window
@@ -1400,10 +1401,280 @@ class PharmacyApp:
         
 
     def show_dispensing(self):
-        self.show_placeholder(
-            "Prescription Dispensing",
-            "Review prescriptions and dispense medicines."
+        """Display prescriptions, their statuses, and dispensing details."""
+
+        for widget in self.content.winfo_children():
+            widget.destroy()
+
+        tk.Label(
+            self.content,
+            text="Medicine Dispensing",
+            font=("Arial", 20, "bold"),
+            bg="white"
+        ).pack(anchor="w", pady=(0, 15))
+
+        tk.Label(
+            self.content,
+            text="Select a prescription to view its medicines and status.",
+            font=("Arial", 10),
+            bg="white"
+        ).pack(anchor="w", pady=5)
+
+        # Prescription table
+        pending_frame = tk.LabelFrame(
+            self.content,
+            text="Prescriptions",
+            font=("Arial", 11, "bold"),
+            bg="white",
+            padx=10,
+            pady=10
         )
+        pending_frame.pack(fill="x", pady=5)
+
+        self.pending_prescription_table = ttk.Treeview(
+            pending_frame,
+            columns=(
+                "prescription_id",
+                "patient_id",
+                "branch_code",
+                "prescriber_code",
+                "status"
+            ),
+            show="headings",
+            height=6
+        )
+
+        columns = {
+            "prescription_id": "Prescription ID",
+            "patient_id": "Patient ID",
+            "branch_code": "Branch",
+            "prescriber_code": "Prescriber",
+            "status": "Status"
+        }
+
+        for column, heading in columns.items():
+            self.pending_prescription_table.heading(
+                column, text=heading
+            )
+            self.pending_prescription_table.column(
+                column, width=130
+            )
+
+        self.pending_prescription_table.pack(
+            fill="x", expand=True
+        )
+
+        self.pending_prescription_table.bind(
+            "<<TreeviewSelect>>",
+            self.show_selected_prescription
+        )
+
+        # Selected prescription details
+        details_frame = tk.LabelFrame(
+            self.content,
+            text="Prescription Medicines",
+            font=("Arial", 11, "bold"),
+            bg="white",
+            padx=10,
+            pady=10
+        )
+        details_frame.pack(fill="both", expand=True, pady=10)
+
+        self.selected_prescription_label = tk.Label(
+            details_frame,
+            text="No prescription selected.",
+            font=("Arial", 10, "bold"),
+            bg="white"
+        )
+        self.selected_prescription_label.pack(
+            anchor="w", pady=5
+        )
+
+        self.dispensing_lines_table = ttk.Treeview(
+            details_frame,
+            columns=(
+                "medicine_code",
+                "medicine_name",
+                "quantity"
+            ),
+            show="headings",
+            height=6
+        )
+
+        self.dispensing_lines_table.heading(
+            "medicine_code", text="Medicine Code"
+        )
+        self.dispensing_lines_table.heading(
+            "medicine_name", text="Medicine Name"
+        )
+        self.dispensing_lines_table.heading(
+            "quantity", text="Quantity Required"
+        )
+
+        self.dispensing_lines_table.column(
+            "medicine_code", width=150
+        )
+        self.dispensing_lines_table.column(
+            "medicine_name", width=250
+        )
+        self.dispensing_lines_table.column(
+            "quantity", width=150
+        )
+
+        self.dispensing_lines_table.pack(
+            fill="both", expand=True, pady=5
+        )
+
+        # Dispense button
+        tk.Button(
+            self.content,
+            text="Dispense Selected Prescription",
+            command=self.dispense_selected_prescription,
+            bg="#2E7D32",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=15,
+            pady=8
+        ).pack(anchor="e", pady=5)
+
+        self.refresh_pending_prescriptions()
+
+    def refresh_pending_prescriptions(self):
+        """Refresh all prescriptions and their current statuses."""
+
+        for item in self.pending_prescription_table.get_children():
+            self.pending_prescription_table.delete(item)
+
+        for item in self.dispensing_lines_table.get_children():
+            self.dispensing_lines_table.delete(item)
+
+        self.selected_prescription_label.config(
+            text="No prescription selected."
+        )
+
+        with self.db.connect() as connection:
+            prescriptions = connection.execute("""
+                SELECT
+                    prescription_id,
+                    patient_id,
+                    branch_code,
+                    prescriber_code,
+                    status
+                FROM prescriptions
+                ORDER BY rowid DESC
+            """).fetchall()
+
+        for prescription in prescriptions:
+            self.pending_prescription_table.insert(
+                "",
+                "end",
+                values=(
+                    prescription["prescription_id"],
+                    prescription["patient_id"],
+                    prescription["branch_code"],
+                    prescription["prescriber_code"],
+                    prescription["status"]
+                )
+            )
+
+    def show_selected_prescription(self, event=None):
+        """Display the medicines belonging to the selected prescription."""
+
+        selected = self.pending_prescription_table.selection()
+
+        if not selected:
+            return
+
+        values = self.pending_prescription_table.item(
+            selected[0], "values"
+        )
+
+        prescription_id = values[0]
+
+        self.selected_prescription_label.config(
+            text=f"Selected Prescription: {prescription_id}"
+        )
+
+        for item in self.dispensing_lines_table.get_children():
+            self.dispensing_lines_table.delete(item)
+
+        with self.db.connect() as connection:
+            lines = connection.execute("""
+                SELECT
+                    pl.medicine_code,
+                    m.name AS medicine_name,
+                    SUM(pl.quantity) AS quantity
+                FROM prescription_lines pl
+                JOIN medicines m
+                    ON pl.medicine_code = m.medicine_code
+                WHERE pl.prescription_id = ?
+                GROUP BY pl.medicine_code, m.name
+                ORDER BY m.name
+            """, (prescription_id,)).fetchall()
+
+        for line in lines:
+            self.dispensing_lines_table.insert(
+                "",
+                "end",
+                values=(
+                    line["medicine_code"],
+                    line["medicine_name"],
+                    line["quantity"]
+                )
+            )
+
+    def dispense_selected_prescription(self):
+        """Send the selected prescription to the dispensing service."""
+
+        selected = self.pending_prescription_table.selection()
+
+        if not selected:
+            messagebox.showwarning(
+                "No Selection",
+                "Please select a pending prescription first."
+            )
+            return
+
+        values = self.pending_prescription_table.item(
+            selected[0], "values"
+        )
+
+        prescription_id = values[0]
+
+        if values[4] != "pending":
+            messagebox.showwarning(
+                "Prescription Not Pending",
+                "Only pending prescriptions can be dispensed."
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Dispensing",
+            f"Are you sure you want to dispense prescription "
+            f"{prescription_id}?"
+        )
+
+        if not confirm:
+            return
+
+        try:
+            self.dispensing_service.dispense(prescription_id)
+
+            messagebox.showinfo(
+                "Dispensing Successful",
+                f"Prescription {prescription_id} has been "
+                "successfully dispensed."
+            )
+
+            self.refresh_pending_prescriptions()
+
+        except Exception as error:
+            messagebox.showerror(
+                "Dispensing Failed",
+                str(error)
+            )
+
+            self.refresh_pending_prescriptions()
 
     def show_reports(self):
         self.show_placeholder(
