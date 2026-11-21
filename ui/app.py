@@ -3,6 +3,7 @@ from models.branch import Branch
 from services.pharmacy_service import PharmacyService
 import tkinter as tk
 from tkinter import ttk, messagebox
+from models.prescription import Prescription, PrescriptionLine
 
 
 class PharmacyApp:
@@ -1009,10 +1010,394 @@ class PharmacyApp:
             )
 
     def show_prescriptions(self):
-        self.show_placeholder(
-            "Prescription Management",
-            "Create prescriptions containing one or more medicines."
+        """Display the prescription creation form and saved prescriptions."""
+
+        for widget in self.content.winfo_children():
+            widget.destroy()
+
+        self.prescription_draft_lines = []
+
+        tk.Label(
+            self.content,
+            text="Prescription Management",
+            font=("Arial", 20, "bold"),
+            bg="white"
+        ).pack(anchor="w", pady=(0, 15))
+
+        # Main form
+        form = tk.LabelFrame(
+            self.content,
+            text="Create New Prescription",
+            font=("Arial", 11, "bold"),
+            bg="white",
+            padx=12,
+            pady=10
         )
+        form.pack(fill="x", pady=5)
+
+        # Prescription details
+        tk.Label(form, text="Prescription ID:", bg="white").grid(
+            row=0, column=0, sticky="w", padx=5, pady=5
+        )
+        self.prescription_id_entry = tk.Entry(form, width=25)
+        self.prescription_id_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(form, text="Patient ID:", bg="white").grid(
+            row=0, column=2, sticky="w", padx=5, pady=5
+        )
+        self.patient_id_entry = tk.Entry(form, width=25)
+        self.patient_id_entry.grid(row=0, column=3, padx=5, pady=5)
+
+        tk.Label(form, text="Prescriber Code:", bg="white").grid(
+            row=1, column=0, sticky="w", padx=5, pady=5
+        )
+        self.prescriber_entry = tk.Entry(form, width=25)
+        self.prescriber_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        tk.Label(form, text="Branch:", bg="white").grid(
+            row=1, column=2, sticky="w", padx=5, pady=5
+        )
+
+        with self.db.connect() as connection:
+            branches = connection.execute(
+                "SELECT branch_code, branch_name FROM branches "
+                "ORDER BY branch_name"
+            ).fetchall()
+
+            medicines = connection.execute(
+                "SELECT medicine_code, name FROM medicines ORDER BY name"
+            ).fetchall()
+
+        self.prescription_branch_lookup = {
+            f"{row['branch_code']} - {row['branch_name']}": row["branch_code"]
+            for row in branches
+        }
+
+        self.prescription_medicine_lookup = {
+            f"{row['medicine_code']} - {row['name']}": row["medicine_code"]
+            for row in medicines
+        }
+
+        self.prescription_branch_combo = ttk.Combobox(
+            form,
+            width=23,
+            values=list(self.prescription_branch_lookup.keys())
+        )
+        self.prescription_branch_combo.grid(
+            row=1, column=3, padx=5, pady=5
+        )
+
+        # Medicine selection
+        medicine_frame = tk.LabelFrame(
+            self.content,
+            text="Add Medicines to Prescription",
+            font=("Arial", 11, "bold"),
+            bg="white",
+            padx=12,
+            pady=10
+        )
+        medicine_frame.pack(fill="x", pady=10)
+
+        tk.Label(medicine_frame, text="Medicine:", bg="white").grid(
+            row=0, column=0, padx=5, pady=5, sticky="w"
+        )
+
+        self.prescription_medicine_combo = ttk.Combobox(
+            medicine_frame,
+            width=35,
+            state="readonly",
+            values=list(self.prescription_medicine_lookup.keys())
+        )
+        self.prescription_medicine_combo.grid(
+            row=0, column=1, padx=5, pady=5
+        )
+
+        tk.Label(medicine_frame, text="Quantity:", bg="white").grid(
+            row=0, column=2, padx=5, pady=5, sticky="w"
+        )
+
+        self.prescription_quantity_entry = tk.Entry(
+            medicine_frame, width=12
+        )
+        self.prescription_quantity_entry.grid(
+            row=0, column=3, padx=5, pady=5
+        )
+
+        tk.Button(
+            medicine_frame,
+            text="Add Medicine",
+            command=self.add_prescription_line,
+            bg="#1976D2",
+            fg="white",
+            padx=10
+        ).grid(row=0, column=4, padx=10, pady=5)
+
+        # Draft prescription lines
+        self.prescription_line_tree = ttk.Treeview(
+            self.content,
+            columns=("medicine_code", "medicine_name", "quantity"),
+            show="headings",
+            height=5
+        )
+
+        self.prescription_line_tree.heading(
+            "medicine_code", text="Medicine Code"
+        )
+        self.prescription_line_tree.heading(
+            "medicine_name", text="Medicine Name"
+        )
+        self.prescription_line_tree.heading(
+            "quantity", text="Quantity"
+        )
+
+        self.prescription_line_tree.column(
+            "medicine_code", width=150
+        )
+        self.prescription_line_tree.column(
+            "medicine_name", width=250
+        )
+        self.prescription_line_tree.column(
+            "quantity", width=100
+        )
+
+        self.prescription_line_tree.pack(fill="x", pady=5)
+
+        tk.Button(
+            self.content,
+            text="Save Prescription",
+            command=self.save_prescription_gui,
+            bg="#2E7D32",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            padx=15,
+            pady=7
+        ).pack(anchor="e", pady=8)
+
+        # Previously saved prescriptions
+        tk.Label(
+            self.content,
+            text="Saved Prescriptions",
+            font=("Arial", 14, "bold"),
+            bg="white"
+        ).pack(anchor="w", pady=(12, 5))
+
+        self.prescription_table = ttk.Treeview(
+            self.content,
+            columns=(
+                "prescription_id",
+                "patient_id",
+                "branch_code",
+                "prescriber_code",
+                "status"
+            ),
+            show="headings",
+            height=7
+        )
+
+        headings = {
+            "prescription_id": "Prescription ID",
+            "patient_id": "Patient ID",
+            "branch_code": "Branch",
+            "prescriber_code": "Prescriber",
+            "status": "Status"
+        }
+
+        for column, heading in headings.items():
+            self.prescription_table.heading(column, text=heading)
+            self.prescription_table.column(column, width=130)
+
+        self.prescription_table.pack(fill="both", expand=True)
+
+        self.refresh_prescriptions()
+
+    def add_prescription_line(self):
+        """Add a medicine and quantity to the current prescription."""
+
+        selected_medicine = self.prescription_medicine_combo.get()
+        quantity_text = self.prescription_quantity_entry.get().strip()
+
+        if not selected_medicine:
+            messagebox.showerror(
+                "Missing Medicine",
+                "Please select a medicine."
+            )
+            return
+
+        try:
+            quantity = int(quantity_text)
+            if quantity <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror(
+                "Invalid Quantity",
+                "Enter a whole number greater than zero."
+            )
+            return
+
+        medicine_code = self.prescription_medicine_lookup[
+            selected_medicine
+        ]
+        medicine_name = selected_medicine.split(" - ", 1)[1]
+
+        # Combine duplicate medicine entries in the draft.
+        existing_line = next(
+            (
+                line for line in self.prescription_draft_lines
+                if line["medicine_code"] == medicine_code
+            ),
+            None
+        )
+
+        if existing_line:
+            existing_line["quantity"] += quantity
+        else:
+            self.prescription_draft_lines.append({
+                "medicine_code": medicine_code,
+                "medicine_name": medicine_name,
+                "quantity": quantity
+            })
+
+        # Refresh the draft table.
+        for item in self.prescription_line_tree.get_children():
+            self.prescription_line_tree.delete(item)
+
+        for line in self.prescription_draft_lines:
+            self.prescription_line_tree.insert(
+                "",
+                "end",
+                values=(
+                    line["medicine_code"],
+                    line["medicine_name"],
+                    line["quantity"]
+                )
+            )
+
+        self.prescription_quantity_entry.delete(0, tk.END)
+        self.prescription_medicine_combo.set("")
+
+    def save_prescription_gui(self):
+        """Validate and save the prescription in the database."""
+
+        prescription_id = self.prescription_id_entry.get().strip()
+        patient_id = self.patient_id_entry.get().strip()
+        prescriber_code = self.prescriber_entry.get().strip()
+        selected_branch = self.prescription_branch_combo.get()
+
+        if not all([
+            prescription_id,
+            patient_id,
+            prescriber_code,
+            selected_branch
+        ]):
+            messagebox.showerror(
+                "Missing Information",
+                "Please complete all prescription details."
+            )
+            return
+
+        if not self.prescription_draft_lines:
+            messagebox.showerror(
+                "No Medicines",
+                "Add at least one medicine before saving."
+            )
+            return
+
+        branch_code = self.prescription_branch_lookup.get(selected_branch)
+
+        if branch_code is None:
+            entered_branch = selected_branch.strip()
+            with self.db.connect() as connection:
+                branch = connection.execute(
+                    """
+                    SELECT branch_code
+                    FROM branches
+                    WHERE branch_code = ? OR branch_name = ?
+                    """,
+                    (entered_branch, entered_branch)
+                ).fetchone()
+
+            if branch is None:
+                messagebox.showerror(
+                    "Invalid Branch",
+                    "Enter or select a registered branch."
+                )
+                return
+
+            branch_code = branch["branch_code"]
+
+        try:
+            lines = [
+                PrescriptionLine(
+                    medicine_code=line["medicine_code"],
+                    quantity=line["quantity"]
+                )
+                for line in self.prescription_draft_lines
+            ]
+
+            prescription = Prescription(
+                prescription_id=prescription_id,
+                patient_id=patient_id,
+                branch_code=branch_code,
+                prescriber_code=prescriber_code,
+                lines=lines
+            )
+
+            self.pharmacy_service.create_prescription(prescription)
+
+            messagebox.showinfo(
+                "Success",
+                "Prescription created successfully."
+            )
+
+            self.prescription_id_entry.delete(0, tk.END)
+            self.patient_id_entry.delete(0, tk.END)
+            self.prescriber_entry.delete(0, tk.END)
+            self.prescription_branch_combo.set("")
+
+            self.prescription_draft_lines.clear()
+
+            for item in self.prescription_line_tree.get_children():
+                self.prescription_line_tree.delete(item)
+
+            self.refresh_prescriptions()
+
+        except Exception as error:
+            messagebox.showerror(
+                "Prescription Error",
+                str(error)
+            )
+
+    def refresh_prescriptions(self):
+        """Load saved prescriptions into the table."""
+
+        for item in self.prescription_table.get_children():
+            self.prescription_table.delete(item)
+
+        with self.db.connect() as connection:
+            prescriptions = connection.execute("""
+                SELECT
+                    prescription_id,
+                    patient_id,
+                    branch_code,
+                    prescriber_code,
+                    status
+                FROM prescriptions
+                ORDER BY rowid DESC
+            """).fetchall()
+
+        for prescription in prescriptions:
+            self.prescription_table.insert(
+                "",
+                "end",
+                values=(
+                    prescription["prescription_id"],
+                    prescription["patient_id"],
+                    prescription["branch_code"],
+                    prescription["prescriber_code"],
+                    prescription["status"]
+                )
+            )
+        
 
     def show_dispensing(self):
         self.show_placeholder(
